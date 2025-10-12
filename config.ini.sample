@@ -1,0 +1,24 @@
+[llm]
+# LLM Provider: openai or anthropic
+provider = openai
+
+# OpenAI settings
+# Note: Set your API key in .env file as OPENAI_API_KEY
+openai_model = gpt-4o
+
+# Anthropic settings  
+# Note: Set your API key in .env file as ANTHROPIC_API_KEY
+anthropic_model = claude-3-sonnet-20240229
+
+[file_config]
+system_prompt = ./prompts/system.txt
+prompts_format = ./prompts/tr_{name}.txt
+out_csv_format = ./csv/tr_{name}_{time}_{stem}.csv
+log_format = ./log/journalize_{time}.log
+
+[processing]
+# Chunk size for processing transactions
+chunk_size = 10
+
+# Enable debug logging
+debug = false

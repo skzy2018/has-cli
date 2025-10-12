@@ -1,0 +1,7 @@
+CREATE TABLE data_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    csvfile_id INTEGER NOT NULL,
+    update_date DATETIME NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY(csvfile_id) REFERENCES csvfiles(id)
+);
