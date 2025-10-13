@@ -264,14 +264,15 @@ has-cli/
 │   ├── db_lib.py               # データベース操作ライブラリ
 │   ├── transaction_journalizer.py  # AI仕訳処理
 │   └── init_db.py              # データベース初期化スクリプト
-├── db/
-│   ├── database.sqlite         # SQLiteデータベース
+├── data/
+│   ├── db/                     # SQLiteデータベース
 │   └── ddl/                    # テーブル定義SQL
-├── csv/                        # 仕訳済みCSVファイル出力先
+│   └── csv/                    # 仕訳済みCSVファイル出力先
+│   └── prompts/                # AIプロンプトファイル
+│   └── sql/                    # doSQLコマンドで実行するsqlファイル
 ├── log/                        # ログファイル出力先
-├── prompts/                    # AIプロンプトファイル
 ├── config.ini                  # アプリケーション設定
-├── .env                        # 環境変数（APIキー等）
+├── .env                        # 環境変数（langsmith APIキー等）
 └── requirements.txt            # Python依存パッケージ
 ```
 
@@ -281,6 +282,7 @@ has-cli/
 
 1. `config.ini`のLLMモデル設定を確認
 2. `prompts/system.txt`のシステムプロンプトを確認
+3. `prompts/*.txt`の各仕訳Agentのプロンプトを確認
 
 ## ライセンス
 
@@ -289,14 +291,6 @@ has-cli/
 ## 貢献
 
 大きな変更を行う場合は、まずIssueを開いて、変更内容について議論してください。
-
-### 貢献の手順
-
-1. このリポジトリをフォーク
-2. 機能ブランチを作成 (`git checkout -b feature/AmazingFeature`)
-3. 変更をコミット (`git commit -m 'Add some AmazingFeature'`)
-4. ブランチにプッシュ (`git push origin feature/AmazingFeature`)
-5. プルリクエストを作成
 
 ### 開発環境のセットアップ
 

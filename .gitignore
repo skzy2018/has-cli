@@ -1,0 +1,14 @@
+__pycache__/
+create_till_202407/
+env/
+.env
+.env.*
+.env*
+!.env.example
+data/csv/*
+data/prompts/tj_*.txt
+data/db/database.sqlite
+config.ini
+!config.ini.sample
+log/*.log
+fromWeb/
