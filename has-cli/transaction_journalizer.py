@@ -42,7 +42,7 @@ except ImportError:
 class StateSchema(TypedDict):
     file_path: str
     bank_name: str
-    timestamp: str
+    timestamp: datetime.datetime
     #raw_data: Optional[str]
     #parsed_data: Optional[List[Dict[str, Any]]]
     chunked_data: Optional[List[str]]
@@ -680,17 +680,21 @@ class TransactionJournalizer:
             self.logger.error(f"Response content: {response.content}")
             return []
 
-    def _generate_csv_output(self, journalized_data: List[Dict[str, Any]], timestamp: str, filename: str) -> str:
+    def _generate_csv_output(self, journalized_data: List[Dict[str, Any]], timestamp: datetime.datetime, filename: str) -> str:
         """Generate CSV output file"""
         f_name = Path(filename).stem
-        output_file = self.out_csv_format.format(name=self.bank_name, time=timestamp, stem=f_name)
+        time_str = timestamp.strftime("%Y%m%d%H%M")
+        year = timestamp.strftime("%Y")
+        month = timestamp.strftime("%m")
+        output_file = self.out_csv_format.format(name=self.bank_name, time=time_str, year=year, month=month, stem=f_name)
         
         # CSV headers matching the database schema
         headers = [
             "date", "account", "type", "category", "transfer", 
             "amount", "item_name", "tags", "desc", "memo"
         ]
-        
+
+        Path(output_file).parent.mkdir(parents=True, exist_ok=True)
         with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=headers)
             writer.writeheader()
@@ -706,7 +710,7 @@ class TransactionJournalizer:
     def process_file(self, file_path: str) -> Tuple[str, str]:
         """Process transaction file and return output paths"""
         self.logger.info(f"Processing file: {file_path}")
-        timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        timestamp = datetime.datetime.now()
         
         # Initial state
         initial_state: StateSchema = {
