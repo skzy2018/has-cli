@@ -693,7 +693,8 @@ class TransactionJournalizer:
             "date", "account", "type", "category", "transfer", 
             "amount", "item_name", "tags", "desc", "memo"
         ]
-        
+
+        Path(output_file).parent.mkdir(parents=True, exist_ok=True)
         with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=headers)
             writer.writeheader()
