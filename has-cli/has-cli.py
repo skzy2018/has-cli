@@ -72,6 +72,14 @@ class UniversalTabCompleter:
         return None
 
 
+SQL_FILE_DIR = 'data/sql/'
+
+def complete_sqlfiles(text):
+    """SQLファイル名の補完"""
+    li = [ f for f in os.listdir(SQL_FILE_DIR) if f.startswith(text)]
+    return [f for f in li if f.endswith('.sql')]
+
+
 def complete_files(text):
     """ファイル名の補完"""
     matches = []
@@ -153,7 +161,7 @@ class HasCLI:
             ],
             "doSQL": [
                 {
-                    "completer": complete_files,
+                    "completer": complete_sqlfiles,
                 }
             ],
             "count": [
@@ -896,7 +904,7 @@ class HasCLI:
                     self.console.print("[red]使用法: dosql <sqlfile> [args ...][/red]")
                     return False
                 else:
-                    sqlfile = parts[1]
+                    sqlfile = SQL_FILE_DIR + parts[1]
                     args = tuple(parts[2:]) if len(parts) > 2 else ()
                     self.cmd_doSQL(sqlfile, args)        
                     
