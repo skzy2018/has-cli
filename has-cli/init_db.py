@@ -6,7 +6,7 @@ ddl_files = [
     "accounts.sql", "categories.sql", "tags.sql",
     "transactions.sql", "transfers.sql", "assets.sql",
     "transaction_tags.sql", "data_logs.sql", "files.sql", 
-    "agents.sql", "csvfiles.sql"
+    "agents.sql", "archives.sql", "csvfiles.sql"
 ]
 
 def init_database(db_path_arg:str, ddl_path_arg: str):

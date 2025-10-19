@@ -2,6 +2,9 @@
 import sqlite3
 import csv
 from pathlib import Path
+import zipfile
+import os
+import shutil
 
 import datetime
 from datetime import datetime
@@ -913,8 +916,9 @@ class db_reporter:
 
 
 class DatabaseManager(db_reporter, db_loader):
-    def __init__(self, db_path="./db/database.sqlite"):
+    def __init__(self, db_path="./db/database.sqlite", archive_file_format="archive_{id}_{time}.zip"):
         super().__init__(db_path)
+        self.archive_file_format = archive_file_format
 
     def get_connect(self):
         if self.conn is None:
@@ -924,3 +928,203 @@ class DatabaseManager(db_reporter, db_loader):
 
     def do_disconnect(self,conn: sqlite3.Connection):
         pass
+
+    def archive_csv(self, csvfile_ids: List[int]) -> Tuple[List[str], Optional[int]]:
+        """Archive CSV files to a zip file
+        
+        Args:
+            csvfile_ids: List of CSV file IDs to archive
+
+        Returns:
+            Tuple of (list of messages, archive_id or None if failed)
+        """
+        ret_str = []
+        
+        if not csvfile_ids:
+            return [f"[red]有効なCSVファイルIDが指定されていません[/red]"], None
+            
+        conn = self.get_connect()
+        if conn is None:
+            return [f"[red]データベースに接続できません[/red]"], None
+        cursor = conn.cursor()
+        
+        try:
+            # Get archive file format from config
+            archive_format = self.archive_file_format
+            
+            # Begin transaction
+            cursor.execute("BEGIN TRANSACTION")
+            
+            # Get CSV files info
+            csv_files = []
+            for csvfile_id in csvfile_ids:
+                query = "SELECT id, name, archive_id FROM csvfiles WHERE id = ?"
+                cursor.execute(query, (csvfile_id,))
+                result = cursor.fetchone()
+                
+                if not result:
+                    ret_str.append(f"[yellow]CSVファイルID {csvfile_id} が見つかりません[/yellow]")
+                    continue
+                    
+                if result[2] is not None:
+                    ret_str.append(f"[yellow]CSVファイルID {csvfile_id} は既にアーカイブされています (archive_id: {result[2]})[/yellow]")
+                    continue
+                    
+                csv_files.append((result[0], result[1]))
+            
+            if not csv_files:
+                conn.rollback()
+                return ret_str + [f"[red]アーカイブ対象のCSVファイルがありません[/red]"], None
+            
+            # Create archive record
+            archive_data = {
+                "filename": "",  # Will update after creating the file
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            cursor.execute("INSERT INTO archives (filename, created_at) VALUES (?, ?)", 
+                         (archive_data["filename"], archive_data["created_at"]))
+            archive_id = cursor.lastrowid
+            
+            # Generate archive filename
+            time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+            archive_filename = archive_format.format(id=archive_id, time=time_str)
+            archive_path = Path("data/arch") / archive_filename
+            
+            # Create archive directory if it doesn't exist
+            archive_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Create zip file
+            archived_files = []
+            with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for csv_id, csv_path_str in csv_files:
+                    csv_path = Path(csv_path_str)
+                    if csv_path.exists():
+                        # Add file to zip with its relative path
+                        arcname = csv_path.name  # Store just the filename in the archive
+                        zipf.write(csv_path, arcname)
+                        archived_files.append((csv_id, csv_path_str))
+                        ret_str.append(f"[cyan]アーカイブ中: {csv_path_str}[/cyan]")
+                    else:
+                        ret_str.append(f"[yellow]ファイルが見つかりません: {csv_path_str}[/yellow]")
+            
+            # Update archive record with filename
+            cursor.execute("UPDATE archives SET filename = ? WHERE id = ?", 
+                         (str(archive_path), archive_id))
+            
+            # Update csvfiles records and delete original files
+            for csv_id, csv_path_str in archived_files:
+                # Update archive_id in csvfiles
+                cursor.execute("UPDATE csvfiles SET archive_id = ? WHERE id = ?", 
+                             (archive_id, csv_id))
+                
+                # Delete the original CSV file
+                csv_path = Path(csv_path_str)
+                if csv_path.exists():
+                    csv_path.unlink()
+                    ret_str.append(f"[green]削除: {csv_path_str}[/green]")
+            
+            # Commit transaction
+            conn.commit()
+            
+            ret_str.append(f"[green]アーカイブが完了しました[/green]")
+            ret_str.append(f"  アーカイブID: {archive_id}")
+            ret_str.append(f"  アーカイブファイル: {archive_path}")
+            ret_str.append(f"  アーカイブされたファイル数: {len(archived_files)}")
+            
+            return ret_str, archive_id
+            
+        except Exception as e:
+            conn.rollback()
+            return ret_str + [f"[red]アーカイブ中にエラーが発生しました: {e}[/red]"], None
+        finally:
+            cursor.close()
+
+    def extract(self, archive_id: int) -> Tuple[List[str], Optional[int]]:
+        """Extract CSV files from an archive
+        
+        Args:
+            archive_id: The ID of the archive to extract
+            
+        Returns:
+            Tuple of (list of messages, number of extracted files or None if failed)
+        """
+        ret_str = []
+        conn = self.get_connect()
+        if conn is None:
+            return [f"[red]データベースに接続できません[/red]"], None
+        cursor = conn.cursor()
+        
+        try:
+            # Begin transaction
+            cursor.execute("BEGIN TRANSACTION")
+            
+            # Get archive info
+            query = "SELECT id, filename FROM archives WHERE id = ?"
+            cursor.execute(query, (archive_id,))
+            archive_result = cursor.fetchone()
+            
+            if not archive_result:
+                return [f"[red]アーカイブID {archive_id} が見つかりません[/red]"], None
+            
+            archive_path = Path(archive_result[1])
+            
+            if not archive_path.exists():
+                return [f"[red]アーカイブファイルが見つかりません: {archive_path}[/red]"], None
+            
+            # Get CSV files associated with this archive
+            query = "SELECT id, name FROM csvfiles WHERE archive_id = ?"
+            cursor.execute(query, (archive_id,))
+            csv_files = cursor.fetchall()
+            
+            if not csv_files:
+                return [f"[yellow]このアーカイブに関連するCSVファイルが見つかりません[/yellow]"], None
+            
+            # Extract files
+            extracted_count = 0
+            with zipfile.ZipFile(archive_path, 'r') as zipf:
+                for csv_id, csv_path_str in csv_files:
+                    csv_path = Path(csv_path_str)
+                    # Extract the file
+                    try:
+                        # Get the archived name (just the filename)
+                        arcname = csv_path.name
+                        # Create parent directory if it doesn't exist
+                        csv_path.parent.mkdir(parents=True, exist_ok=True)
+                        # Extract to the original location
+                        with zipf.open(arcname) as source, open(csv_path, 'wb') as target:
+                            target.write(source.read())
+                        ret_str.append(f"[green]復元: {csv_path_str}[/green]")
+                        extracted_count += 1
+                        
+                        # Update csvfiles record
+                        cursor.execute("UPDATE csvfiles SET archive_id = NULL WHERE id = ?", 
+                                     (csv_id,))
+                    except KeyError:
+                        ret_str.append(f"[yellow]アーカイブ内にファイルが見つかりません: {arcname}[/yellow]")
+                    except Exception as e:
+                        ret_str.append(f"[yellow]ファイルの復元に失敗しました: {csv_path_str} - {e}[/yellow]")
+            
+            if extracted_count == 0:
+                conn.rollback()
+                return ret_str + [f"[red]ファイルを復元できませんでした[/red]"], None
+            
+            # Delete archive file
+            archive_path.unlink()
+            ret_str.append(f"[cyan]アーカイブファイルを削除: {archive_path}[/cyan]")
+            
+            # Delete archive record
+            cursor.execute("DELETE FROM archives WHERE id = ?", (archive_id,))
+            
+            # Commit transaction
+            conn.commit()
+            
+            ret_str.append(f"[green]復元が完了しました[/green]")
+            ret_str.append(f"  復元されたファイル数: {extracted_count}")
+            
+            return ret_str, extracted_count
+            
+        except Exception as e:
+            conn.rollback()
+            return [f"[red]復元中にエラーが発生しました: {e}[/red]"], None
+        finally:
+            cursor.close()
