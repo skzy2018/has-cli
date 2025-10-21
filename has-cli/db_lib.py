@@ -955,10 +955,10 @@ class DatabaseManager(db_reporter, db_loader):
             # Begin transaction
             cursor.execute("BEGIN TRANSACTION")
             
-            # Get CSV files info
+            # Get CSV files info (including org_name)
             csv_files = []
             for csvfile_id in csvfile_ids:
-                query = "SELECT id, name, archive_id FROM csvfiles WHERE id = ?"
+                query = "SELECT id, name, archive_id, org_name FROM csvfiles WHERE id = ?"
                 cursor.execute(query, (csvfile_id,))
                 result = cursor.fetchone()
                 
@@ -970,7 +970,8 @@ class DatabaseManager(db_reporter, db_loader):
                     ret_str.append(f"[yellow]CSVファイルID {csvfile_id} は既にアーカイブされています (archive_id: {result[2]})[/yellow]")
                     continue
                     
-                csv_files.append((result[0], result[1]))
+                # Store both name and org_name (org_name may be None)
+                csv_files.append((result[0], result[1], result[3]))
             
             if not csv_files:
                 conn.rollback()
@@ -996,32 +997,57 @@ class DatabaseManager(db_reporter, db_loader):
             # Create zip file
             archived_files = []
             with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for csv_id, csv_path_str in csv_files:
+                for csv_id, csv_path_str, org_path_str in csv_files:
                     csv_path = Path(csv_path_str)
+                    
+                    # Archive the main CSV file
                     if csv_path.exists():
                         # Add file to zip with its relative path
                         arcname = csv_path.name  # Store just the filename in the archive
                         zipf.write(csv_path, arcname)
-                        archived_files.append((csv_id, csv_path_str))
+                        archived_files.append((csv_id, csv_path_str, None))
                         ret_str.append(f"[cyan]アーカイブ中: {csv_path_str}[/cyan]")
                     else:
                         ret_str.append(f"[yellow]ファイルが見つかりません: {csv_path_str}[/yellow]")
+                    
+                    # Archive the org_name file if it exists
+                    if org_path_str:
+                        org_path = Path(org_path_str)
+                        if org_path.exists():
+                            # Store org_name file with a prefix to distinguish it
+                            org_arcname = f"org_{csv_id}_{org_path.name}"
+                            zipf.write(org_path, org_arcname)
+                            archived_files.append((csv_id, None, org_path_str))
+                            ret_str.append(f"[cyan]アーカイブ中 (元ファイル): {org_path_str}[/cyan]")
+                        else:
+                            ret_str.append(f"[yellow]元ファイルが見つかりません: {org_path_str}[/yellow]")
             
             # Update archive record with filename
             cursor.execute("UPDATE archives SET filename = ? WHERE id = ?", 
                          (str(archive_path), archive_id))
             
             # Update csvfiles records and delete original files
-            for csv_id, csv_path_str in archived_files:
-                # Update archive_id in csvfiles
-                cursor.execute("UPDATE csvfiles SET archive_id = ? WHERE id = ?", 
-                             (archive_id, csv_id))
+            processed_ids = set()
+            for csv_id, csv_path_str, org_path_str in archived_files:
+                # Update archive_id in csvfiles (only once per csv_id)
+                if csv_id not in processed_ids:
+                    cursor.execute("UPDATE csvfiles SET archive_id = ? WHERE id = ?", 
+                                 (archive_id, csv_id))
+                    processed_ids.add(csv_id)
                 
                 # Delete the original CSV file
-                csv_path = Path(csv_path_str)
-                if csv_path.exists():
-                    csv_path.unlink()
-                    ret_str.append(f"[green]削除: {csv_path_str}[/green]")
+                if csv_path_str:
+                    csv_path = Path(csv_path_str)
+                    if csv_path.exists():
+                        csv_path.unlink()
+                        ret_str.append(f"[green]削除: {csv_path_str}[/green]")
+                
+                # Delete the original org_name file
+                if org_path_str:
+                    org_path = Path(org_path_str)
+                    if org_path.exists():
+                        org_path.unlink()
+                        ret_str.append(f"[green]削除 (元ファイル): {org_path_str}[/green]")
             
             # Commit transaction
             conn.commit()
@@ -1071,8 +1097,8 @@ class DatabaseManager(db_reporter, db_loader):
             if not archive_path.exists():
                 return [f"[red]アーカイブファイルが見つかりません: {archive_path}[/red]"], None
             
-            # Get CSV files associated with this archive
-            query = "SELECT id, name FROM csvfiles WHERE archive_id = ?"
+            # Get CSV files associated with this archive (including org_name)
+            query = "SELECT id, name, org_name FROM csvfiles WHERE archive_id = ?"
             cursor.execute(query, (archive_id,))
             csv_files = cursor.fetchall()
             
@@ -1082,9 +1108,9 @@ class DatabaseManager(db_reporter, db_loader):
             # Extract files
             extracted_count = 0
             with zipfile.ZipFile(archive_path, 'r') as zipf:
-                for csv_id, csv_path_str in csv_files:
+                for csv_id, csv_path_str, org_path_str in csv_files:
+                    # Extract the main CSV file
                     csv_path = Path(csv_path_str)
-                    # Extract the file
                     try:
                         # Get the archived name (just the filename)
                         arcname = csv_path.name
@@ -1095,14 +1121,32 @@ class DatabaseManager(db_reporter, db_loader):
                             target.write(source.read())
                         ret_str.append(f"[green]復元: {csv_path_str}[/green]")
                         extracted_count += 1
-                        
-                        # Update csvfiles record
-                        cursor.execute("UPDATE csvfiles SET archive_id = NULL WHERE id = ?", 
-                                     (csv_id,))
                     except KeyError:
                         ret_str.append(f"[yellow]アーカイブ内にファイルが見つかりません: {arcname}[/yellow]")
                     except Exception as e:
                         ret_str.append(f"[yellow]ファイルの復元に失敗しました: {csv_path_str} - {e}[/yellow]")
+                    
+                    # Extract the org_name file if it exists
+                    if org_path_str:
+                        org_path = Path(org_path_str)
+                        org_arcname = f"org_{csv_id}_{org_path.name}"
+                        try:
+                            # Create parent directory if it doesn't exist
+                            org_path.parent.mkdir(parents=True, exist_ok=True)
+                            # Extract to the original org_name location
+                            with zipf.open(org_arcname) as source, open(org_path, 'wb') as target:
+                                target.write(source.read())
+                            ret_str.append(f"[green]復元 (元ファイル): {org_path_str}[/green]")
+                            extracted_count += 1
+                        except KeyError:
+                            # org_name file might not be in the archive if it didn't exist during archiving
+                            pass
+                        except Exception as e:
+                            ret_str.append(f"[yellow]元ファイルの復元に失敗しました: {org_path_str} - {e}[/yellow]")
+                    
+                    # Update csvfiles record
+                    cursor.execute("UPDATE csvfiles SET archive_id = NULL WHERE id = ?", 
+                                 (csv_id,))
             
             if extracted_count == 0:
                 conn.rollback()
