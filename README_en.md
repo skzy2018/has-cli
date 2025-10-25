@@ -178,6 +178,8 @@ python has-cli/has-cli.py --config ./custom_config.ini
 | `register <file> <agent> [original file]` | Register journalized CSV | `register output.csv smbc` |
 | `load_csv <id>` | Register CSV data to DB | `load_csv 1` |
 | `rollback_csv <id>` | Rollback registered data | `rollback_csv 1` |
+| `archive_csv <ids>` | Archive CSV files | `archive_csv 1,3-5,7` |
+| `extract <archive_id>` | Restore CSV files from archive | `extract 1` |
 
 ### Reports and Aggregation
 
@@ -217,8 +219,9 @@ python has-cli/has-cli.py --config ./custom_config.ini
 | `transfers` | Transfer transaction management |
 | `tags` | Tag master |
 | `transaction_tags` | Transaction-tag associations |
-| `csvfiles` | Imported CSV file information |
+| `csvfiles` | Imported CSV file information (includes archive_id) |
 | `data_logs` | Data load history |
+| `archives` | Archive file management |
 
 ### Transaction Table Structure
 
@@ -254,6 +257,63 @@ Prompts corresponding to each bank's transaction format are automatically genera
 - CSV format (`.csv`)
 - PDF format (`.pdf`) - Bank transaction statement PDFs
 
+## CSV File Archive Feature
+
+### Overview
+
+You can save disk space by compressing used CSV files into archives. Archived files can be restored when needed.
+
+### How Archive Works
+
+- Compresses specified CSV files into ZIP format
+- Archives both the main CSV file and the original file (recorded in the `org_name` column)
+- Original files are automatically deleted after archiving
+- Archive information is managed in the `archives` table in the database
+- Tracks archive status by recording `archive_id` in the `csvfiles` table
+
+### Usage Examples
+
+#### Archiving CSV Files
+
+```bash
+# Archive single file
+has-cli > archive_csv 1
+
+# Archive multiple files (comma-separated)
+has-cli > archive_csv 1,3,5
+
+# Archive with range specification
+has-cli > archive_csv 1-5
+
+# Combined specification
+has-cli > archive_csv 1,3-5,7,10-12
+```
+
+#### Restoring from Archive
+
+```bash
+# Restore files from archive ID 1
+has-cli > extract 1
+```
+
+### Important Notes
+
+- Already archived CSV files cannot be archived again
+- Archive files are stored in the `data/arch/` directory
+- When restoring, archive files are automatically deleted
+- Files already loaded into the database can also be archived (transaction data remains in the database)
+
+### Customizing Archive Filename
+
+You can configure the archive filename format in `config.ini`:
+
+```ini
+[database]
+# Archive filename format
+# Available variables: {id} (archive ID), {time} (timestamp)
+archive_file_format = {id}_{time}.zip
+```
+
 ## Project Structure
 
 ```
@@ -263,12 +323,14 @@ has-cli/
 │   ├── db_lib.py               # Database operation library
 │   ├── transaction_journalizer.py  # AI journalization processing
 │   └── init_db.py              # Database initialization script
-├── db/
-│   ├── database.sqlite         # SQLite database
-│   └── ddl/                    # Table definition SQL
-├── csv/                        # Journalized CSV file output destination
+├── data/
+│   ├── arch/                   # Archive file storage
+│   ├── db/                     # SQLite database
+│   ├── ddl/                    # Table definition SQL
+│   ├── csv/                    # Journalized CSV file output destination
+│   ├── prompts/                # AI prompt files
+│   └── sql/                    # SQL files for doSQL command execution
 ├── log/                        # Log file output destination
-├── prompts/                    # AI prompt files
 ├── config.ini                  # Application settings
 ├── .env                        # Environment variables (API keys, etc.)
 └── requirements.txt            # Python dependencies

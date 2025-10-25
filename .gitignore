@@ -6,6 +6,7 @@ env/
 .env*
 !.env.example
 data/csv/*
+data/arch/*
 data/prompts/tj_*.txt
 data/db/database.sqlite
 config.ini

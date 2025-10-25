@@ -16,6 +16,17 @@ prompts_format = ./prompts/tr_{name}.txt
 out_csv_format = ./csv/tr_{name}_{time}_{stem}.csv
 log_format = ./log/journalize_{time}.log
 
+[database]
+# Database file path
+database = ./data/db/db.sqlite
+ddl_dir = ./data/ddl/
+sql_file_dir = ./data/sql/
+account_default_currency = 'JPY'
+
+# Archive file format
+# Available variables: {id} (archive ID), {time} (timestamp)
+archive_file_format = {id}_{time}.zip
+
 [processing]
 # Chunk size for processing transactions
 chunk_size = 10

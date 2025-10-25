@@ -72,14 +72,6 @@ class UniversalTabCompleter:
         return None
 
 
-SQL_FILE_DIR = 'data/sql/'
-
-def complete_sqlfiles(text):
-    """SQLファイル名の補完"""
-    li = [ f for f in os.listdir(SQL_FILE_DIR) if f.startswith(text)]
-    return [f for f in li if f.endswith('.sql')]
-
-
 def complete_files(text):
     """ファイル名の補完"""
     matches = []
@@ -114,8 +106,6 @@ def complete_files(text):
     return sorted(matches)
 
 
-
-
 class HasCLI:
     """家計簿データベースCLIアプリケーション"""
 
@@ -140,7 +130,9 @@ class HasCLI:
         #self.db_path = self.config.get("database", "database", fallback="./data/db/database.sqlite")
         self.db_path = self.config.get("database", "database")
         self.ddl_dir = self.config.get("database", "ddl_dir")
-        self.db_manager = DatabaseManager(self.db_path)
+        self.sql_file_dir = self.config.get("database", "sql_file_dir", fallback='data/sql/')
+        self.archive_file_format = self.config.get("archive", "archive_file_format", fallback="archive_{time}.zip")
+        self.db_manager = DatabaseManager(self.db_path, self.archive_file_format)
         # タブ補完の設定
         self.completer = UniversalTabCompleter({
             "help": [],
@@ -161,7 +153,7 @@ class HasCLI:
             ],
             "doSQL": [
                 {
-                    "completer": complete_sqlfiles,
+                    "completer": self.complete_sqlfiles,
                 }
             ],
             "count": [
@@ -186,7 +178,9 @@ class HasCLI:
                 {
                     "completer": complete_files,
                 }
-            ]
+            ],
+            "archive_csv": [],
+            "extract": []
         })
         self.setup_readline()
         
@@ -219,6 +213,43 @@ class HasCLI:
 
         # 区切り文字の設定（スペースのみ）
         readline.set_completer_delims(' \t\n')
+
+    def complete_sqlfiles(self, text: str) -> List[str]:
+        """SQLファイル名の補完"""
+        li = [ f for f in os.listdir(self.sql_file_dir) if f.startswith(text)]
+        return [f for f in li if f.endswith('.sql')]
+
+    def parse_csvfile_ids(self, ids_str: str) -> List[int]:
+        """Parse CSV file IDs from string format (e.g., "1,3-5,7")
+        
+        Args:
+            ids_str: String containing IDs with comma and hyphen separators
+            
+        Returns:
+            List of integer IDs
+        """
+        result = []
+        parts = ids_str.split(',')
+        
+        for part in parts:
+            part = part.strip()
+            if '-' in part:
+                # Handle range
+                try:
+                    start, end = part.split('-')
+                    start = int(start.strip())
+                    end = int(end.strip())
+                    result.extend(range(start, end + 1))
+                except ValueError:
+                    continue
+            else:
+                # Handle single ID
+                try:
+                    result.append(int(part))
+                except ValueError:
+                    continue
+                    
+        return sorted(list(set(result)))  # Remove duplicates and sort
         
     def cmd_tables(self):
         """テーブル名のリスト表示"""
@@ -675,6 +706,46 @@ class HasCLI:
         except Exception as e:
             self.console.print(f"[red]エラー: {e}[/red]")
 
+    def cmd_archive_csv(self, csvfile_ids_str: str):
+        """CSVファイルをアーカイブする
+        
+        Args:
+            csvfile_ids: CSVファイルIDのリスト（カンマ区切りやハイフン範囲指定可）
+        """
+        try:
+            csvfile_ids = self.parse_csvfile_ids(csvfile_ids_str)
+            mesgs, archive_id = self.db_manager.archive_csv(csvfile_ids)
+            
+            for mesg in mesgs:
+                self.console.print(mesg)
+                
+            if archive_id is None:
+                self.console.print(f"[red]アーカイブに失敗しました[/red]")
+            
+        except Exception as e:
+            self.console.print(f"[red]エラー: {e}[/red]")
+
+    def cmd_extract(self, archive_id: str):
+        """アーカイブからCSVファイルを復元する
+        
+        Args:
+            archive_id: アーカイブID
+        """
+        try:
+            archive_id_int = int(archive_id)
+            mesgs, extracted_count = self.db_manager.extract(archive_id_int)
+            
+            for mesg in mesgs:
+                self.console.print(mesg)
+                
+            if extracted_count is None:
+                self.console.print(f"[red]復元に失敗しました[/red]")
+                
+        except ValueError:
+            self.console.print(f"[red]archive_idは数値で指定してください: {archive_id}[/red]")
+        except Exception as e:
+            self.console.print(f"[red]エラー: {e}[/red]")
+
     def cmd_doSQL(self, sqlfile: str, args: Tuple ):
         """SQL文を実行
         Args:
@@ -899,12 +970,29 @@ class HasCLI:
                 else:
                     self.cmd_del_account(parts[1])
 
+            # archive_csv コマンド
+            elif cmd == "archive_csv":
+                if len(parts) < 2:
+                    self.console.print("[red]使用法: archive_csv <csvfile_ids>[/red]")
+                    self.console.print("[yellow]  例: archive_csv 1,3-5,7[/yellow]")
+                    return False
+                else:
+                    self.cmd_archive_csv(parts[1])
+
+            # extract コマンド
+            elif cmd == "extract":
+                if len(parts) < 2:
+                    self.console.print("[red]使用法: extract <archive_id>[/red]")
+                    return False
+                else:
+                    self.cmd_extract(parts[1])
+
             elif cmd == "dosql":
                 if len(parts) < 2:
                     self.console.print("[red]使用法: dosql <sqlfile> [args ...][/red]")
                     return False
                 else:
-                    sqlfile = SQL_FILE_DIR + parts[1]
+                    sqlfile = self.sql_file_dir + parts[1]
                     args = tuple(parts[2:]) if len(parts) > 2 else ()
                     self.cmd_doSQL(sqlfile, args)        
                     
@@ -936,6 +1024,8 @@ class HasCLI:
   load_csv <id>                            - CSVロード実行
   sum_log <log_id>                         - 指定したcsvfile_idで登録された取引のサマリ合計表示
   rollback_csv <id>                        - CSVロールバック
+  archive_csv <ids>                        - CSVファイルをアーカイブ (例: 1,3-5,7)
+  extract <archive_id>                     - アーカイブからCSVファイルを復元
   ins_agent <name> <prompt_file>           - エージェントの追加
   del_agent <agent_id>                     - エージェントテーブルのデータ削除
   ins_account <name> <account_type>        - アカウントの追加
