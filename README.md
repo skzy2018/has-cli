@@ -179,6 +179,8 @@ python has-cli/has-cli.py --config ./custom_config.ini
 | `register <file> <agent> [original file]` | 仕訳済みCSVの登録 | `register output.csv smbc` |
 | `load_csv <id>` | CSVデータのDB登録 | `load_csv 1` |
 | `rollback_csv <id>` | 登録データのロールバック | `rollback_csv 1` |
+| `archive_csv <ids>` | CSVファイルをアーカイブ | `archive_csv 1,3-5,7` |
+| `extract <archive_id>` | アーカイブからCSVファイルを復元 | `extract 1` |
 
 ### レポート・集計
 
@@ -218,8 +220,9 @@ python has-cli/has-cli.py --config ./custom_config.ini
 | `transfers` | 振替取引管理 |
 | `tags` | タグマスタ |
 | `transaction_tags` | 取引とタグの関連付け |
-| `csvfiles` | インポートしたCSVファイル情報 |
+| `csvfiles` | インポートしたCSVファイル情報（archive_id含む） |
 | `data_logs` | データロード履歴 |
+| `archives` | アーカイブファイル管理 |
 
 ### トランザクションテーブル構造
 
@@ -255,6 +258,63 @@ CREATE TABLE transactions (
 - CSV形式（`.csv`）
 - PDF形式（`.pdf`） - 銀行の取引明細PDF
 
+## CSVファイルのアーカイブ機能
+
+### 概要
+
+使用済みのCSVファイルを圧縮してアーカイブすることで、ディスク容量を節約できます。アーカイブされたファイルは必要に応じて復元できます。
+
+### アーカイブの仕組み
+
+- 指定されたCSVファイルをZIP形式で圧縮
+- 元のCSVファイルと、元ファイル（`org_name`カラムに記録されたファイル）の両方をアーカイブ
+- アーカイブ後、元のファイルは自動的に削除される
+- データベースに`archives`テーブルでアーカイブ情報を管理
+- `csvfiles`テーブルに`archive_id`を記録し、アーカイブ状態を追跡
+
+### 使用例
+
+#### CSVファイルのアーカイブ
+
+```bash
+# 単一ファイルのアーカイブ
+has-cli > archive_csv 1
+
+# 複数ファイルのアーカイブ（カンマ区切り）
+has-cli > archive_csv 1,3,5
+
+# 範囲指定でアーカイブ
+has-cli > archive_csv 1-5
+
+# 組み合わせ指定
+has-cli > archive_csv 1,3-5,7,10-12
+```
+
+#### アーカイブからの復元
+
+```bash
+# アーカイブID 1 からファイルを復元
+has-cli > extract 1
+```
+
+### 注意事項
+
+- アーカイブ済みのCSVファイルは再度アーカイブできません
+- アーカイブファイルは`data/arch/`ディレクトリに保存されます
+- 復元時、アーカイブファイルは自動的に削除されます
+- データベースにロード済みのファイルもアーカイブできます（取引データはデータベースに残ります）
+
+### アーカイブファイル名のカスタマイズ
+
+`config.ini`でアーカイブファイル名のフォーマットを設定できます：
+
+```ini
+[database]
+# アーカイブファイル名フォーマット
+# 使用可能な変数: {id} (アーカイブID), {time} (タイムスタンプ)
+archive_file_format = {id}_{time}.zip
+```
+
 ## プロジェクト構造
 
 ```
@@ -265,10 +325,11 @@ has-cli/
 │   ├── transaction_journalizer.py  # AI仕訳処理
 │   └── init_db.py              # データベース初期化スクリプト
 ├── data/
+│   ├── arch/                   # アーカイブファイル保存先
 │   ├── db/                     # SQLiteデータベース
-│   └── ddl/                    # テーブル定義SQL
-│   └── csv/                    # 仕訳済みCSVファイル出力先
-│   └── prompts/                # AIプロンプトファイル
+│   ├── ddl/                    # テーブル定義SQL
+│   ├── csv/                    # 仕訳済みCSVファイル出力先
+│   ├── prompts/                # AIプロンプトファイル
 │   └── sql/                    # doSQLコマンドで実行するsqlファイル
 ├── log/                        # ログファイル出力先
 ├── config.ini                  # アプリケーション設定
